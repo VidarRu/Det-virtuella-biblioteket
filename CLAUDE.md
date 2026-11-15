@@ -65,14 +65,17 @@ Det vi tar därifrån:
   fotorealistiska texturer.
 - **Enkla, tydliga färgytor** i stället för mönster och detaljer.
 - **Typsnittet Nunito**, runt och vänligt, i alla rutor och skyltar.
-- **Modell på en platta.** Huset står på en stenlagd sockel i en liten
-  park med gräs och runda träd (`src/omgivning.js`). Väggarnas överkant
-  har en något mörkare ton, så att planlösningen syns uppifrån. Träden
-  står alltid en bit från huset och är lägre än kameran, så att de inte
-  skymmer figuren.
+- **Modell på en platta.** Huset står på en stenlagd sockel mitt i sitt
+  riktiga kvarter: gator, torg, gräs, träd och grannhus som låga
+  leksaksklossar (`src/omgivning.js`, ritat efter en satellitbild i
+  `src/data/omgivning.json`). Ju längre från huset, desto mer tonar allt
+  bort i en gråvit intighet. Väggarnas överkant har en något mörkare ton,
+  så att planlösningen syns uppifrån. Träd och grannhus står alltid en
+  bit från huset och är lägre än kameran, så att de inte skymmer figuren.
 - **Varmt ljus och mjuka skuggor.** Solen står i sydost. Skuggorna i
-  vinklar och springor, skenet kring lamporna och tonkurvan läggs på i
-  `src/efterbehandling.js`. Inget av det rör sig.
+  vinklar och springor och tonkurvan läggs på i `src/efterbehandling.js`.
+  Inget av det rör sig. Inga ljusfläckar eller sken på golvet, det blev
+  prickigt som konfetti.
 
 Det vi inte tar: fysiken, att saker välter och studsar, och allt som rör
 sig av sig självt. Lugnet går före leksakskänslan.
@@ -95,11 +98,12 @@ alltid i `src/mobler.js` och `src/former.js` först.
 | Fil | Innehåll |
 | --- | --- |
 | `src/data/layout.json`, `layout_plan1.json` | All geometri per våning: väggar, dörrar, hyllor, möbler, zoner, infopunkter, trappor och hiss, startplats |
-| `src/config/content.js` | Alla texter, platser och färger: `SIDA`, `PLATSER`, `OPPETTIDER`, `KONTAKT`, `INFOPUNKTER`, `RUTOR`, `BEHOV`, `MOBIL`, `MINISPEL`, `BOKJAKT`, `TEMA` |
+| `src/data/omgivning.json` | Kvarteret runt huset: gator, torg, gräs, parkeringar, grannhus och träd, och var allt tonar bort |
+| `src/config/content.js` | Alla texter, platser och färger: `SIDA`, `KARTOR`, `OMGIVNING`, `PLATSER`, `OPPETTIDER`, `KONTAKT`, `INFOPUNKTER`, `RUTOR`, `BEHOV`, `MOBIL`, `MINISPEL`, `BOKJAKT`, `TEMA` |
 | `src/vyer.js` | Fasta kameravyer för granskning (`?vy=oversikt`, `?vy=salen` …) |
 | `src/varld.js`, `mobler.js`, `bocker.js`, `former.js` | Bygger 3D-världen ur kartfilen |
-| `src/omgivning.js` | Det som finns runt huset: stenlagd sockel, gräs och runda träd. Går inte att gå på |
-| `src/efterbehandling.js` | Bildens sista steg: mjuka skuggor i vinklar, svagt sken kring lampor, tonkurva |
+| `src/omgivning.js` | Det som finns runt huset: stenlagd sockel och kvarteret ur `omgivning.json`, som tonar bort långt bort. Går inte att gå på |
+| `src/efterbehandling.js` | Bildens sista steg: mjuka skuggor i vinklar, tonkurva |
 | `src/zoner.js` | Golvzoner och skyltar, inklusive `fritFranVaggar` |
 | `src/vagvisning.js` | Gula prickar och vägsökning, även mellan våningar |
 | `src/mobilmeny.js`, `firande.js` | Mobilläget |
@@ -132,12 +136,27 @@ på plan 1.
   man kliver på och en ankomstplats.
 - `valplats` är där hjulet dyker upp, `start` där figuren börjar.
 
+### Kvarteret runt huset
+
+- `src/data/omgivning.json` har samma koordinater som kartfilerna.
+  `ytor` är det som målas på marken (`gata`, `gang`, `torg`, `gras`,
+  `parkering`), `hus` är grannhus med höjd och tak (`ljust`, `mork`,
+  `rott`, `gront`), och `trad` är träd och buskar.
+- `bortom` säger hur många meter från huset allt börjar tona bort och var
+  det har försvunnit helt i bakgrundens gråvita färg (`TEMA.bakgrund`).
+- Utgå från en satellitbild. Kolla kompassen: kartan i appen kan vara
+  vriden. Håll grannhusen låga och några meter från huset.
+
 ## Önskemål som gäller överallt
 
 - Skyltar ska synas från alla håll. En skylt vänder sig alltid mot kameran
   och får aldrig hamna i en vägg, ett slutet rum, ett hisschakt eller en
   pelare. `fritFranVaggar` sköter det, och `window.spel.skyltar` gör det
   möjligt att kontrollera.
+- Lamporna får inte krocka med skyltar eller i-bubblor. En lampa som
+  hamnar för nära flyttas av sig själv till närmaste fria plats
+  (`byggLampor` i `src/varld.js`). Kontrollera med `window.spel.lampor`
+  och `window.spel.skyltar`.
 - Låt hellre skyltar sväva fritt än stå i hyllor där det inte passar.
 - Sittmöbler ska vändas mot varandra, parvis kring bord.
 - Hitta inte på möbler eller hyllor som inte finns på skisserna.
@@ -163,7 +182,7 @@ på plan 1.
   minuter att rendera.
 - `window.spel` är en krok för granskningen: `stall(x, z, riktning)`,
   `ga(sekunder, knappar)`, `bytVaning(plan)`, `titta(...)`, `skyltar`,
-  `plattor`, `layout` med flera (slutet av `src/main.js`).
+  `lampor`, `plattor`, `layout` med flera (slutet av `src/main.js`).
 - `?kvalitet=hog` låser bilden på finaste nivån och `?kvalitet=lag` på
   den enklaste. Utan det börjar bilden fin och blir enklare av sig själv
   om det går trögt (`matFart` i `src/main.js`). I Chromium utan grafikkort
@@ -183,7 +202,8 @@ Fråga mig om det här innan du börjar bygga:
    biblioteket i sin grafiska profil? Gör dem dämpade och lägg dem i
    `TEMA` i `content.js`. Visa förslaget innan det används överallt.
 3. **Underlaget.** Planskiss för varje våning, och ritning och foton om de
-   finns. Hur många våningar, och var trappor och hiss finns.
+   finns. Hur många våningar, och var trappor och hiss finns. En
+   satellitbild av kvarteret, till `omgivning.json`.
 4. **Spelen.** Ska Biblioteksorientering och Bokjakten finnas med? I så
    fall, på vilken plats ska de startas (`RUTOR.spelPlats`)? Utan spel:
    `spelPlats: null`, och stryk raden om spelen i `RUTOR.instruktionRader`.
@@ -203,6 +223,10 @@ Det här är det som byts ut när motorn används för ett annat bibliotek:
 - Kartfilerna i `src/data`, en per våning: `layout.json` (plan 0) och
   `layout_plan1.json` (plan 1). Vilka filer som läses står i `KARTOR` i
   `content.js`, med entréplanet först.
+- Kvarteret runt huset i `src/data/omgivning.json` (`OMGIVNING` i
+  `content.js`). Västervik: entrén vetter mot Spötorget och Bredgatan i
+  öster, Bryggaren kulturscen och parken ligger i väster, Kulturskolan i
+  söder och Biostaden i sydost.
 - Allt innehåll i `src/config/content.js`: namn, adress, öppettider,
   platser, färger (`TEMA`, även gräs, träd, himmel och solljus), valen i `BEHOV`, var spelen startar
   (`RUTOR.spelPlats`, eller `null` för inga spel).

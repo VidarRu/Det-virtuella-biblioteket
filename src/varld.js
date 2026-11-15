@@ -149,7 +149,7 @@ function golvDuk(layout, tema) {
   return duk;
 }
 
-function byggGolv(layout, tema) {
+function byggGolv(layout, tema, omgivning) {
   const grupp = new THREE.Group();
   const kant = mat(tema.vaggKant);
   const hal = halIGolvet(layout);
@@ -174,10 +174,10 @@ function byggGolv(layout, tema) {
   yta.name = "golvyta";
   grupp.add(yta);
 
-  // Runt huset: en stenlagd sockel, gras och trad. Pa en ovre vaning
-  // ligger marken en vaning ner, se byggUtsikt.
+  // Runt huset: en stenlagd sockel och kvarteret omkring. Pa en ovre
+  // vaning ligger marken en vaning ner, se byggUtsikt.
   const markDjup = layout.utsikt?.djup ?? GOLVTJOCKLEK;
-  grupp.add(byggOmgivning(layout, tema, hal, -markDjup - 0.01));
+  grupp.add(byggOmgivning(layout, tema, hal, -markDjup - 0.01, omgivning));
   if (layout.utsikt) grupp.add(byggUtsikt(layout, tema, hal));
   return grupp;
 }
@@ -396,38 +396,35 @@ function wcSkylt(x, z, sida) {
 
 // --------------------------------------------------------------- lampor
 
-let polMaterial = null;
-/** Lampans varma sken pa golvet: en mjuk rund flack som inte ror sig. */
-function ljuspol(x, z, tema) {
-  if (!polMaterial) {
-    const duk = document.createElement("canvas");
-    duk.width = duk.height = 128;
-    const c = duk.getContext("2d");
-    const g = c.createRadialGradient(64, 64, 0, 64, 64, 64);
-    g.addColorStop(0, "rgba(255,255,255,1)");
-    g.addColorStop(0.35, "rgba(255,255,255,0.55)");
-    g.addColorStop(1, "rgba(255,255,255,0)");
-    c.fillStyle = g;
-    c.fillRect(0, 0, 128, 128);
-    polMaterial = new THREE.MeshBasicMaterial({
-      map: new THREE.CanvasTexture(duk), color: tema.lampSken, transparent: true,
-      opacity: 0.34, blending: THREE.AdditiveBlending, depthWrite: false });
-  }
-  const pol = new THREE.Mesh(new THREE.CircleGeometry(2.3, 32), polMaterial);
-  pol.rotation.x = -Math.PI / 2;
-  pol.position.set(x, 0.012, z);
-  pol.renderOrder = 1;
-  return pol;
+/**
+ * Var en lampa krockar med en skylt. En skylt vander sig mot kameran, sa
+ * sett uppifran tar den upp en cirkel. Lampan hanger mellan kupans kant
+ * och taket, och en skylt strax under kupan raknas ocksa, eftersom de
+ * ser ut att sitta ihop sedda snett uppifran.
+ */
+const LAMPHOJD = 2.35;
+const LAMPRADIE = 0.34;
+function krockarMedSkylt(x, z, skyltar) {
+  return skyltar.some(s =>
+    s.y + s.halvHojd > LAMPHOJD - 0.5 &&
+    Math.hypot(s.x - x, s.z - z) < s.radie + LAMPRADIE + 0.8);
 }
 
-/** Pendellampor over de zoner som TEMA namner, fler over stora zoner. */
-function byggLampor(layout, tema) {
+/**
+ * Pendellampor over de zoner som TEMA namner, fler over stora zoner.
+ * Hamnar en lampa i en skylt flyttas den langs zonen tills den ar fri,
+ * och gar det inte hoppas den over. Ger tillbaka gruppen och var
+ * lamporna hanger.
+ */
+function byggLampor(layout, tema, skyltar = []) {
   const grupp = new THREE.Group();
+  const lagen = [];
   // En lampa far inte hanga inuti en vagg eller ett slutet rum.
   const LUFT = 0.6;
   const iVagen = (x, z) => [...layout.walls, ...layout.blocks.filter(b => !b.gangbar)]
     .some(o => x > o.x - LUFT && x < o.x + o.bredd + LUFT &&
                z > o.z - LUFT && z < o.z + o.djup + LUFT);
+  const fri = (x, z) => !iVagen(x, z) && !krockarMedSkylt(x, z, skyltar);
 
   for (const id of tema.lampor || []) {
     const zon = layout.zones.find(z => z.id === id);
@@ -437,26 +434,47 @@ function byggLampor(layout, tema) {
       if (yta < 6) continue;
       const antal = Math.min(2, Math.max(1, Math.round(yta / 45)));
       const langsX = r.bredd >= r.djup;
+      const langd = langsX ? r.bredd : r.djup;
       for (let i = 0; i < antal; i++) {
         const a = (i + 0.5) / antal;
-        const x = langsX ? r.x + r.bredd * a : r.x + r.bredd / 2;
-        const z = langsX ? r.z + r.djup / 2 : r.z + r.djup * a;
-        if (iVagen(x, z)) continue;
-        grupp.add(pendellampa(x, z, tema));
-        grupp.add(ljuspol(x, z, tema));
+        const plats = s => (langsX ? [r.x + s, r.z + r.djup / 2] : [r.x + r.bredd / 2, r.z + s]);
+        // Prova forst mitt i sin del av zonen. Ar det upptaget, ta den
+        // narmaste fria platsen, i steg om 30 cm. En liten zon, som en
+        // disk, far lampan hanga en bit utanfor.
+        const [mx, mz] = plats(langd * a);
+        let vald = fri(mx, mz) ? [mx, mz] : null;
+        if (!vald) {
+          let basta = Infinity;
+          const ut = 1.5;
+          for (let x = r.x - ut; x <= r.x + r.bredd + ut; x += 0.3) {
+            for (let z = r.z - ut; z <= r.z + r.djup + ut; z += 0.3) {
+              const d = Math.hypot(x - mx, z - mz);
+              if (d < basta && d < 4 && fri(x, z)) { basta = d; vald = [x, z]; }
+            }
+          }
+        }
+        if (!vald) continue;
+        grupp.add(pendellampa(vald[0], vald[1], tema, LAMPHOJD));
+        lagen.push({ zon: id, x: vald[0], z: vald[1] });
       }
     }
   }
+  grupp.userData.lagen = lagen;
   return grupp;
 }
 
 // ----------------------------------------------------------------- allt
 
-export function byggVarld(layout, tema) {
+/**
+ * Bygger en vaning. omgivning ar kvarteret runt huset (omgivning.json),
+ * och skyltar ar var skyltarna hanger, sa att lamporna kan halla sig
+ * undan dem.
+ */
+export function byggVarld(layout, tema, { omgivning, skyltar = [] } = {}) {
   const varld = new THREE.Group();
   varld.name = "varld";
 
-  varld.add(byggGolv(layout, tema));
+  varld.add(byggGolv(layout, tema, omgivning));
   varld.add(byggVaggar(layout, tema));
 
   const hyllor = byggHyllor(layout, tema);
@@ -471,7 +489,9 @@ export function byggVarld(layout, tema) {
   }
   varld.add(mobler);
 
-  varld.add(byggLampor(layout, tema));
+  const lampor = byggLampor(layout, tema, skyltar);
+  varld.userData.lampor = lampor.userData.lagen;
+  varld.add(lampor);
   return slaIhop(varld);
 }
 
@@ -508,7 +528,7 @@ export function byggLjus(layout, tema, { skuggkarta = 4096 } = {}) {
   return grupp;
 }
 
-// ------------------------------------------------------------- himlen
+// ------------------------------------------------------ omgivningsljus
 
 function himmelDuk(tema) {
   const duk = document.createElement("canvas");
@@ -522,22 +542,6 @@ function himmelDuk(tema) {
   c.fillStyle = g;
   c.fillRect(0, 0, 4, 256);
   return duk;
-}
-
-/**
- * Himlen: en stor kupa som tonar fran varmt vid horisonten till svalt
- * hogst upp. Diset har samma farg som horisonten, sa marken overgar i
- * himlen utan nagon kant.
- */
-export function byggHimmel(tema) {
-  const tex = new THREE.CanvasTexture(himmelDuk(tema));
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const kupa = new THREE.Mesh(new THREE.SphereGeometry(330, 32, 24),
-    new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false }));
-  kupa.name = "himmel";
-  kupa.renderOrder = -10;
-  kupa.frustumCulled = false;
-  return kupa;
 }
 
 /**
