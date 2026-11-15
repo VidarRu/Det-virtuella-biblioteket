@@ -1,14 +1,16 @@
 // Efterbehandling: det som gor att varlden ser ut som en liten modell
 // av lera och papp i stallet for platta fargytor.
 //
-// Bilden ritas forst till en egen yta och far sedan tre saker pa vagen
+// Bilden ritas forst till en egen yta och far sedan tva saker pa vagen
 // till skarmen:
 //
 //   1. Mjuka skuggor i vinklar och springor (dar golv moter vagg, mellan
 //      bocker, under mobler). De raknas ut ur bildens djup.
-//   2. Ett svagt sken runt det som lyser: lamporna och solflackarna.
-//   3. Farger: mjuk tonkurva, och bilden blir en aning morkare ut mot
+//   2. Farger: mjuk tonkurva, och bilden blir en aning morkare ut mot
 //      hornen sa att blicken dras mot mitten.
+//
+// Inget sken eller glitter laggs pa. Det gav prickiga flackar pa ljusa
+// golv, som konfetti.
 //
 // Ingenting har ror sig eller blinkar. Bilden ar stilla nar varlden ar
 // stilla.
@@ -76,41 +78,14 @@ const SKRYMSLEN = /* glsl */`
       skymt += max(dot(n, v) / sqrt(vv + 0.0001) - 0.14, 0.0) * nara;
     }
     float ljus = clamp(1.0 - 1.75 * skymt / float(PROV), 0.0, 1.0);
+    // Langt bort blir radien bara nagon bildpunkt stor, och da blir
+    // skuggorna fel. Dar tonar de bort, marken langt bort ar anda tom.
+    float bildpunkter = skala.y / punkt.y;
+    ljus = mix(1.0, ljus, smoothstep(1.5, 4.0, bildpunkter));
 
     // Djupet foljer med i tva kanaler, till utjamningen.
     float z = clamp(-p.z / langt, 0.0, 1.0) * 255.0;
     gl_FragColor = vec4(ljus, floor(z) / 255.0, fract(z), 1.0);
-  }
-`;
-
-// Tar fram det som lyser starkast, i en fjardedel av storleken.
-const LJUSAST = /* glsl */`
-  precision highp float;
-  varying vec2 vUv;
-  uniform sampler2D tFarg;
-  uniform vec2 punkt;
-  uniform float troskel;
-  void main() {
-    vec3 c = vec3(0.0);
-    for (int x = 0; x < 2; x++) for (int y = 0; y < 2; y++) {
-      vec3 s = texture2D(tFarg, vUv + (vec2(float(x), float(y)) - 0.5) * 2.0 * punkt).rgb;
-      float styrka = max(s.r, max(s.g, s.b));
-      c += s * smoothstep(troskel, troskel * 1.8, styrka) / (1.0 + styrka * 0.25);
-    }
-    gl_FragColor = vec4(c * 0.25, 1.0);
-  }
-`;
-
-const SUDD = /* glsl */`
-  precision highp float;
-  varying vec2 vUv;
-  uniform sampler2D tBild;
-  uniform vec2 steg;
-  void main() {
-    vec3 c = texture2D(tBild, vUv).rgb * 0.227027;
-    c += (texture2D(tBild, vUv + steg * 1.384615).rgb + texture2D(tBild, vUv - steg * 1.384615).rgb) * 0.316216;
-    c += (texture2D(tBild, vUv + steg * 3.230769).rgb + texture2D(tBild, vUv - steg * 3.230769).rgb) * 0.070270;
-    gl_FragColor = vec4(c, 1.0);
   }
 `;
 
@@ -120,12 +95,10 @@ const SLUTBILD = /* glsl */`
   uniform sampler2D tFarg;
   uniform sampler2D tDjup;
   uniform sampler2D tSkrymslen;
-  uniform sampler2D tSken;
   uniform vec2 skrymslePunkt;
   uniform float nara;
   uniform float langt;
   uniform float exponering;
-  uniform float skenStyrka;
   uniform float skrymsleStyrka;
   uniform vec3 skuggfarg;
 
@@ -168,10 +141,6 @@ const SLUTBILD = /* glsl */`
       c *= mix(skuggfarg, vec3(1.0), ljus);
     #endif
 
-    #ifdef SKEN
-      c += texture2D(tSken, vUv).rgb * skenStyrka;
-    #endif
-
     c = tonkurva(c * exponering);
 
     // Lite morkare ut mot hornen.
@@ -202,8 +171,6 @@ export function skapaEfterbehandling(renderare, { enkel = false, niva = 2 } = {}
     depthTexture: new THREE.DepthTexture(4, 4, THREE.UnsignedIntType) });
   bild.depthTexture.minFilter = bild.depthTexture.magFilter = THREE.NearestFilter;
   const skrymslen = yta(THREE.UnsignedByteType, THREE.NearestFilter);
-  const skenA = yta(THREE.HalfFloatType, THREE.LinearFilter);
-  const skenB = yta(THREE.HalfFloatType, THREE.LinearFilter);
 
   const material = (kod, uniforms, defines = {}) => new THREE.ShaderMaterial({
     vertexShader: HORN, fragmentShader: kod, uniforms, defines,
@@ -217,18 +184,13 @@ export function skapaEfterbehandling(renderare, { enkel = false, niva = 2 } = {}
     radie: { value: 0.6 },
     langt: { value: 400 }
   }, { PROV: enkel ? 7 : 11 });
-  const mLjusast = material(LJUSAST, {
-    tFarg: { value: bild.texture }, punkt: { value: new THREE.Vector2() }, troskel: { value: 2.3 } });
-  const mSudd = material(SUDD, { tBild: { value: null }, steg: { value: new THREE.Vector2() } });
   const mSlut = material(SLUTBILD, {
     tFarg: { value: bild.texture },
     tDjup: { value: bild.depthTexture },
     tSkrymslen: { value: skrymslen.texture },
-    tSken: { value: skenA.texture },
     skrymslePunkt: { value: new THREE.Vector2() },
     nara: { value: 0.1 }, langt: { value: 400 },
     exponering: { value: renderare.toneMappingExposure },
-    skenStyrka: { value: 0.4 },
     skrymsleStyrka: { value: 1.0 },
     skuggfarg: { value: new THREE.Color("#6f5648") }
   });
@@ -250,7 +212,6 @@ export function skapaEfterbehandling(renderare, { enkel = false, niva = 2 } = {}
     till.niva = n;
     mSlut.defines = {};
     if (n >= 2) mSlut.defines.SKRYMSLEN = "";
-    if (n >= 1) mSlut.defines.SKEN = "";
     mSlut.needsUpdate = true;
   }
   satNiva(niva);
@@ -271,12 +232,8 @@ export function skapaEfterbehandling(renderare, { enkel = false, niva = 2 } = {}
       bild.setSize(b, h);
       const hb = Math.max(1, Math.ceil(b / 2)), hh = Math.max(1, Math.ceil(h / 2));
       skrymslen.setSize(hb, hh);
-      const fb = Math.max(1, Math.ceil(b / 4)), fh = Math.max(1, Math.ceil(h / 4));
-      skenA.setSize(fb, fh);
-      skenB.setSize(fb, fh);
       mSkrymslen.uniforms.punkt.value.set(1 / hb, 1 / hh);
       mSlut.uniforms.skrymslePunkt.value.set(1 / hb, 1 / hh);
-      mLjusast.uniforms.punkt.value.set(1 / b, 1 / h);
     },
 
     rita(scen, kamera) {
@@ -293,17 +250,6 @@ export function skapaEfterbehandling(renderare, { enkel = false, niva = 2 } = {}
         mSkrymslen.uniforms.projektionInv.value.copy(kamera.projectionMatrixInverse);
         mSkrymslen.uniforms.langt.value = kamera.far;
         kor(mSkrymslen, skrymslen);
-      }
-
-      // Skenet: det ljusaste, suddat tva ganger, den andra gangen bredare.
-      kor(mLjusast, skenA);
-      for (const vidd of [1, 2.2]) {
-        mSudd.uniforms.tBild.value = skenA.texture;
-        mSudd.uniforms.steg.value.set(vidd / skenA.width, 0);
-        kor(mSudd, skenB);
-        mSudd.uniforms.tBild.value = skenB.texture;
-        mSudd.uniforms.steg.value.set(0, vidd / skenA.height);
-        kor(mSudd, skenA);
       }
 
       mSlut.uniforms.nara.value = kamera.near;

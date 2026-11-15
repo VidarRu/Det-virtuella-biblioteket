@@ -43,6 +43,10 @@ export const SIDA = {
 // figuren börjar. Varje kartfil har sitt våningsnummer i "meta": { "plan": … }.
 export const KARTOR = ["layout.json", "layout_plan1.json"];
 
+// Kvarteret runt huset, också i src/data: gator, torg, grannhus och träd,
+// ritade efter en satellitbild. null betyder att huset står ensamt.
+export const OMGIVNING = "omgivning.json";
+
 export const PLATSER = [
   // ---------------------------------------------------- avdelningar
   {
@@ -575,17 +579,32 @@ export const BOKJAKT = {
 //  Starka färger gör kartan plottrig för den som är känslig för intryck.
 
 export const TEMA = {
-  // Himmel och mark runt huset
-  bakgrund:      "#f1e7d8",   // horisonten, och diset långt bort
-  himmelMitt:    "#e9e6da",
-  himmelUpp:     "#c3d6e0",   // svagt blå högst upp
-  mark:          "#efe6d8",
+  // Runt huset. Långt bort tonar allt över i bakgrundens gråvita färg.
+  bakgrund:      "#e9e7e2",   // den gråvita ytan bakom kvarteret
+  himmelMitt:    "#e9e6da",   // himlen syns inte, men ger ljuset dess färg
+  himmelUpp:     "#c3d6e0",
   sockel:        "#d9ccb6",   // den stenlagda plattan som huset står på
-  gras:          "#b7c2a0",   // dämpat grönt runt huset
+  stadsmark:     "#dcd6cc",   // trottoarer och gårdar
+  stadsmarkMork: "#cbc4b8",
+  gata:          "#b4afa7",   // asfalt, dämpat gråbrun
+  kantsten:      "#cfc9bf",
+  gatlinje:      "#e6e1d8",   // svaga rutor på parkeringarna
+  parkering:     "#bdb8b0",
+  torgsten:      "#ddd2c0",   // Spötorget och gångarna
+  torgFog:       "#c6baa6",
+  gras:          "#b7c2a0",   // dämpat grönt
   grasMonster:   "#a6b38f",
   grasLjus:      "#c8d0b1",
   lov:           ["#9cad88", "#8c9f7c", "#acb996"],   // trädens kronor
   stam:          "#8a6f57",
+  husvagg:       "#e7e0d5",   // grannhusens väggar
+  husfonster:    "#bcc4c2",   // och deras fönsterband
+  tak: {                      // grannhusens tak, "tak" i omgivning.json
+    ljust:       "#d3ccc1",
+    mork:        "#9f9a93",
+    rott:        "#b79581",   // dämpat tegelrött
+    gront:       "#aebb98"    // takträdgård
+  },
 
   // Ljuset
   solljus:       "#fff0de",   // varm sol från sydost

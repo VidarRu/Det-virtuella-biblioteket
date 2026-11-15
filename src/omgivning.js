@@ -1,20 +1,25 @@
-// Det som finns runt huset: en stenlagd sockel, gras och runda trad.
+// Det som finns runt huset: en stenlagd sockel, och kvarteret omkring
+// med gator, torg, gras, grannhus och trad.
 //
-// Huset star som en modell pa en platta, mitt i en liten park. Inget av
-// det har gar att ga pa och inget ror sig. Det finns for att huset inte
-// ska svava i tomma intet, och for att det ska synas nagot genom
-// fonstren.
+// Kvarteret beskrivs i src/data/omgivning.json, sa att det stammer med
+// verkligheten for varje bibliotek. Har finns bara hur det ritas.
 //
-// Traden star alltid en bit fran huset och ar lagre an kameran, sa att
-// de aldrig skymmer figuren.
+// Huset star som en modell pa en platta. Narmast huset syns kvarteret
+// tydligt. Langre bort tonar allt sakta bort i en gravit dimma, sa att
+// blicken stannar vid biblioteket. Inget av det gar att ga pa och inget
+// ror sig.
+//
+// Traden och grannhusen ar lagre an kameran och star en bit fran huset,
+// sa att de aldrig skymmer figuren.
 
 import * as THREE from "three";
-import { mat, slump } from "./former.js";
+import { RoundedBoxGeometry } from "../vendor/addons/RoundedBoxGeometry.js";
+import { slump } from "./former.js";
 
 /** Varifran solen lyser, raknat fran husets mitt. */
 export const SOL = new THREE.Vector3(0.62, 0.72, 0.38).normalize();
 
-const RADIE = 150;           // markens radie i meter
+const RADIE = 110;           // markens radie i meter
 const SOCKEL_LUFT = 1.3;     // sa langt sticker sockeln ut utanfor golvet
 const SOCKEL_HOJD = 0.16;
 const TRAD_LUFT = 3.6;       // narmaste trad fran sockelns kant
@@ -24,55 +29,196 @@ const BILDPUNKTER = 2048;
 const husetsRutor = layout =>
   [...layout.floors, ...(layout.utsikt?.tak || []), ...(layout.utsikt?.stengolv || [])];
 
-/** Var traden och buskarna star. Samma varje gang. */
-function planteraTrad(rutor, mitt) {
-  const slp = slump("parken");
-  const trad = [];
-  const fritt = (x, z, luft) => rutor.every(r =>
-    x < r.x - luft || x > r.x + r.bredd + luft || z < r.z - luft || z > r.z + r.djup + luft);
-  for (let i = 0; i < 900 && trad.length < 110; i++) {
-    const v = slp() * Math.PI * 2;
-    // Tatare nara huset, glesare langre bort.
-    const l = 14 + Math.pow(slp(), 1.6) * 95;
-    const x = mitt.x + Math.cos(v) * l, z = mitt.z + Math.sin(v) * l;
-    const buske = slp() < 0.22;
-    const luft = SOCKEL_LUFT + (buske ? 2.6 : TRAD_LUFT);
-    if (!fritt(x, z, luft)) continue;
-    const storlek = buske ? 0.55 + slp() * 0.35 : 1.05 + slp() * 0.5;
-    if (trad.some(t => Math.hypot(t.x - x, t.z - z) < (t.storlek + storlek) * 1.7)) continue;
-    trad.push({ x, z, buske, storlek, farg: Math.floor(slp() * 3), vrid: slp() * Math.PI * 2,
-                stam: buske ? 0 : 0.9 + slp() * 0.5 });
-  }
-  return trad;
+// ------------------------------------------------------- bortre dimman
+
+// Delas av alla material utomhus. Satts av byggOmgivning.
+const BORTOM = {
+  bortomFarg: { value: new THREE.Color("#ebe9e4") },
+  bortomRuta: { value: new THREE.Vector4(0, 0, 1, 1) },   // husets x1, z1, x2, z2
+  bortomAvst: { value: new THREE.Vector2(14, 62) }        // borjar, slutar
+};
+
+/**
+ * Lagger till att ytan tonar over i den gravita dimman ju langre fran
+ * huset den ligger. Avstandet raknas fran husets vaggar, inte fran
+ * kameran, sa att huset sjalvt alltid syns tydligt.
+ */
+function tonaBort(material) {
+  material.onBeforeCompile = s => {
+    Object.assign(s.uniforms, BORTOM);
+    s.vertexShader = s.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vBortom;")
+      .replace("#include <project_vertex>",
+        "#include <project_vertex>\nvBortom = (modelMatrix * vec4(transformed, 1.0)).xyz;");
+    s.fragmentShader = s.fragmentShader
+      .replace("#include <common>", `#include <common>
+        varying vec3 vBortom;
+        uniform vec3 bortomFarg;
+        uniform vec4 bortomRuta;
+        uniform vec2 bortomAvst;`)
+      .replace("#include <fog_fragment>", `#include <fog_fragment>
+        {
+          vec2 utanfor = max(max(bortomRuta.xy - vBortom.xz, vBortom.xz - bortomRuta.zw), 0.0);
+          float bort = smoothstep(bortomAvst.x, bortomAvst.y, length(utanfor));
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, linearToOutputTexel(vec4(bortomFarg, 1.0)).rgb, bort);
+        }`);
+  };
+  material.customProgramCacheKey = () => "tonaBort";
+  return material;
 }
 
-/** Markens ovansida: gras med mjuka flackar och tradens skuggor. */
-function markDuk(tema, mitt, trad) {
+const utomhus = new Map();
+/** Ett matt material som tonar bort langt fran huset. Delas per farg. */
+function uteMat(farg) {
+  if (!utomhus.has(farg)) {
+    utomhus.set(farg, tonaBort(new THREE.MeshStandardMaterial({ color: farg, roughness: 0.95 })));
+  }
+  return utomhus.get(farg);
+}
+
+// --------------------------------------------------------------- marken
+
+/** Marken uppifran: gator, torg, gras och parkeringar, med mjuka skuggor. */
+function markDuk(tema, mitt, kvarter, trad) {
   const B = BILDPUNKTER, P = B / (RADIE * 2);
   const duk = document.createElement("canvas");
   duk.width = duk.height = B;
   const c = duk.getContext("2d");
-  const slp = slump("gras");
+  const slp = slump("marken");
   const px = x => (x - mitt.x) * P + B / 2;
   const pz = z => (z - mitt.z) * P + B / 2;
-
-  c.fillStyle = tema.gras || "#c3c7a6";
-  c.fillRect(0, 0, B, B);
-  c.filter = "blur(18px)";
-  for (let i = 0; i < 520; i++) {
-    c.globalAlpha = 0.16 + slp() * 0.2;
-    c.fillStyle = slp() < 0.55 ? (tema.grasMonster || "#b4ba96") : (tema.grasLjus || "#d2d3b4");
+  const ruta = (r, luft = 0, radie = 0.8) => {
     c.beginPath();
-    c.ellipse(slp() * B, slp() * B, 30 + slp() * 90, 20 + slp() * 60, slp() * Math.PI, 0, Math.PI * 2);
+    c.roundRect(px(r.x - luft), pz(r.z - luft),
+                (r.bredd + 2 * luft) * P, (r.djup + 2 * luft) * P, radie * P);
+  };
+
+  // Grunden ar ljus stenlagd mark, med nagra mjuka flackar.
+  c.fillStyle = tema.stadsmark;
+  c.fillRect(0, 0, B, B);
+  c.filter = "blur(14px)";
+  for (let i = 0; i < 300; i++) {
+    c.globalAlpha = 0.12 + slp() * 0.14;
+    c.fillStyle = slp() < 0.5 ? tema.stadsmarkMork : "#ffffff";
+    c.beginPath();
+    c.ellipse(slp() * B, slp() * B, 20 + slp() * 60, 14 + slp() * 40, slp() * Math.PI, 0, Math.PI * 2);
+    c.fill();
+  }
+  c.filter = "none";
+  c.globalAlpha = 1;
+
+  const ytor = kvarter.ytor || [];
+  const avTyp = typ => ytor.filter(y => y.typ === typ);
+
+  // Gras med mjuka flackar.
+  for (const y of avTyp("gras")) {
+    c.save();
+    ruta(y, 0, 3);
+    c.fillStyle = tema.gras;
+    c.fill();
+    c.clip();
+    c.filter = "blur(10px)";
+    for (let i = 0; i < (y.bredd * y.djup) / 12; i++) {
+      c.globalAlpha = 0.18 + slp() * 0.2;
+      c.fillStyle = slp() < 0.55 ? tema.grasMonster : tema.grasLjus;
+      c.beginPath();
+      c.ellipse(px(y.x + slp() * y.bredd), pz(y.z + slp() * y.djup),
+                (2 + slp() * 5) * P, (1.5 + slp() * 3) * P, slp() * Math.PI, 0, Math.PI * 2);
+      c.fill();
+    }
+    c.restore();
+  }
+
+  // Parkeringar: asfalt med svaga, ljusa rutor.
+  for (const y of avTyp("parkering")) {
+    c.save();
+    ruta(y, 0, 1.2);
+    c.fillStyle = tema.parkering;
+    c.fill();
+    c.clip();
+    c.strokeStyle = tema.gatlinje;
+    c.globalAlpha = 0.55;
+    c.lineWidth = 0.12 * P;
+    const langsX = y.bredd >= y.djup;
+    const langd = langsX ? y.bredd : y.djup, tvars = langsX ? y.djup : y.bredd;
+    for (let rad = 0; rad + 5 <= tvars; rad += 13) {
+      for (let s = 1; s < langd; s += 2.5) {
+        const [x1, z1, x2, z2] = langsX
+          ? [y.x + s, y.z + rad + 1, y.x + s, y.z + rad + 5.5]
+          : [y.x + rad + 1, y.z + s, y.x + rad + 5.5, y.z + s];
+        c.beginPath();
+        c.moveTo(px(x1), pz(z1));
+        c.lineTo(px(x2), pz(z2));
+        c.stroke();
+      }
+    }
+    c.restore();
+  }
+
+  // Gator: asfalt med en kantsten pa varje sida.
+  for (const y of avTyp("gata")) {
+    ruta(y, 0.25, 0.4);
+    c.fillStyle = tema.kantsten;
+    c.fill();
+    ruta(y, 0, 0.3);
+    c.fillStyle = tema.gata;
     c.fill();
   }
 
-  // Skuggorna faller bort fran solen.
+  // Gangar och torg: stenplattor i forskjutna rader.
+  const plattor = (y, farg, fog) => {
+    c.save();
+    ruta(y, 0, 0.6);
+    c.fillStyle = fog;
+    c.fill();
+    c.clip();
+    const PL = 0.9 * P, PH = 0.6 * P;
+    for (let rad = 0, yy = pz(y.z); yy < pz(y.z + y.djup); rad++, yy += PH) {
+      for (let xx = px(y.x) - (rad % 2) * PL / 2; xx < px(y.x + y.bredd); xx += PL) {
+        const bas = new THREE.Color(farg).multiplyScalar(0.95 + slp() * 0.08);
+        c.fillStyle = "#" + bas.getHexString();
+        c.fillRect(xx + 0.6, yy + 0.6, PL - 1.2, PH - 1.2);
+      }
+    }
+    c.restore();
+  };
+  for (const y of avTyp("gang")) plattor(y, tema.torgsten, tema.torgFog);
+  for (const y of avTyp("torg")) {
+    plattor(y, tema.torgsten, tema.torgFog);
+    // Torgets stora rutor, som pa satellitbilden.
+    const nx = y.rutor?.langsX || 0, nz = y.rutor?.langsZ || 0;
+    if (!nx || !nz) continue;
+    const rb = y.bredd / nx, rd = y.djup / nz;
+    c.strokeStyle = tema.torgFog;
+    c.lineWidth = 0.35 * P;
+    for (let i = 0; i < nx; i++) {
+      for (let k = 0; k < nz; k++) {
+        c.beginPath();
+        c.roundRect(px(y.x + i * rb + 0.5), pz(y.z + k * rd + 0.5), (rb - 1) * P, (rd - 1) * P, 0.4 * P);
+        c.stroke();
+      }
+    }
+  }
+
+  // Skuggorna faller bort fran solen: forst husen, sedan traden.
   const fall = { x: -SOL.x / SOL.y, z: -SOL.z / SOL.y };
+  c.filter = "blur(6px)";
+  c.fillStyle = "rgba(74, 66, 52, 0.30)";
+  for (const h of kvarter.hus || []) {
+    const dx = fall.x * h.hojd, dz = fall.z * h.hojd;
+    c.beginPath();
+    c.moveTo(px(h.x), pz(h.z));
+    c.lineTo(px(h.x + h.bredd), pz(h.z));
+    c.lineTo(px(h.x + h.bredd + dx), pz(h.z + dz));
+    c.lineTo(px(h.x + h.bredd + dx), pz(h.z + h.djup + dz));
+    c.lineTo(px(h.x + dx), pz(h.z + h.djup + dz));
+    c.lineTo(px(h.x), pz(h.z + h.djup));
+    c.closePath();
+    c.fill();
+  }
   const vinkel = Math.atan2(fall.z, fall.x);
-  c.filter = "blur(5px)";
-  c.globalAlpha = 1;
-  c.fillStyle = "rgba(74, 78, 52, 0.36)";
+  c.filter = "blur(4px)";
+  c.fillStyle = "rgba(74, 78, 52, 0.34)";
   for (const t of trad) {
     const h = t.stam + t.storlek * 0.9;
     c.beginPath();
@@ -81,15 +227,6 @@ function markDuk(tema, mitt, trad) {
     c.fill();
   }
   c.filter = "none";
-
-  // Langt bort tonar graset over i horisontens farg.
-  const g = c.createRadialGradient(B / 2, B / 2, B * 0.2, B / 2, B / 2, B * 0.5);
-  const hex = new THREE.Color(tema.bakgrund).getHexString();
-  const [r, gr, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
-  g.addColorStop(0, `rgba(${r}, ${gr}, ${b}, 0)`);
-  g.addColorStop(1, `rgba(${r}, ${gr}, ${b}, 1)`);
-  c.fillStyle = g;
-  c.fillRect(0, 0, B, B);
   return duk;
 }
 
@@ -123,6 +260,46 @@ function rundRektangel(x1, y1, x2, y2, r) {
   return f;
 }
 
+// ----------------------------------------------------------- grannhusen
+
+/** En rundad lada, med nordvastra hornet i (x, z) och botten pa y0. */
+function lada(x, z, bredd, djup, hojd, y0, farg, radie) {
+  const r = Math.min(radie, bredd / 2 - 0.01, djup / 2 - 0.01, hojd / 2 - 0.01);
+  const geo = new RoundedBoxGeometry(bredd, hojd, djup, 2, Math.max(r, 0.001));
+  const nat = new THREE.Mesh(geo, uteMat(farg));
+  nat.position.set(x + bredd / 2, y0 + hojd / 2, z + djup / 2);
+  return nat;
+}
+
+/**
+ * Ett grannhus: en lag lada med platt tak, som en byggkloss. Taket ligger
+ * en aning innanfor kanten. Husen kastar ingen riktig skugga, den ar
+ * ritad pa marken i stallet, sa att skuggkartan bara behover tacka
+ * biblioteket.
+ */
+function hus(h, tema, y0) {
+  const g = new THREE.Group();
+  const tak = typ => tema.tak?.[typ] || tema.tak?.ljust || "#d6cfc3";
+  g.add(lada(h.x, h.z, h.bredd, h.djup, h.hojd, y0, tema.husvagg, 0.3));
+  // Ett band av fonster runt huset, sa att det ser ut som ett hus och
+  // inte som en sockel.
+  const glas = tema.husfonster || "#b9c2c1";
+  const ut = 0.04, upp = y0 + Math.min(1.0, h.hojd * 0.3), hog = Math.min(1.2, h.hojd * 0.35);
+  g.add(lada(h.x + 0.8, h.z - ut, h.bredd - 1.6, 0.1, hog, upp, glas, 0.03));
+  g.add(lada(h.x + 0.8, h.z + h.djup - 0.1 + ut, h.bredd - 1.6, 0.1, hog, upp, glas, 0.03));
+  g.add(lada(h.x - ut, h.z + 0.8, 0.1, h.djup - 1.6, hog, upp, glas, 0.03));
+  g.add(lada(h.x + h.bredd - 0.1 + ut, h.z + 0.8, 0.1, h.djup - 1.6, hog, upp, glas, 0.03));
+  const kant = 0.4;
+  g.add(lada(h.x + kant, h.z + kant, h.bredd - 2 * kant, h.djup - 2 * kant, 0.05,
+             y0 + h.hojd, tak(h.tak), 0.02));
+  for (const t of h.takytor || []) {
+    g.add(lada(t.x, t.z, t.bredd, t.djup, 0.08, y0 + h.hojd, tak(t.tak), 0.03));
+  }
+  return g;
+}
+
+// ------------------------------------------------------------------ trad
+
 let kronGeo = null, stamGeo = null;
 
 /** Ett runt leksakstrad: en kort stam och en krona av tre klot. */
@@ -133,7 +310,7 @@ function trad(t, tema, y0) {
   }
   const g = new THREE.Group();
   const lov = tema.lov || ["#a7b08a", "#98a47e", "#b5ba97"];
-  const blad = mat(lov[t.farg % lov.length], { roughness: 0.95 });
+  const blad = uteMat(lov[t.farg % lov.length]);
   const s = t.storlek;
   const klot = (dx, dy, dz, r) => {
     const k = new THREE.Mesh(kronGeo, blad);
@@ -146,7 +323,7 @@ function trad(t, tema, y0) {
     klot(0, s * 0.55, 0, s);
     klot(s * 0.7, s * 0.4, s * 0.2, s * 0.7);
   } else {
-    const stam = new THREE.Mesh(stamGeo, mat(tema.stam || "#8a6f57", { roughness: 0.95 }));
+    const stam = new THREE.Mesh(stamGeo, uteMat(tema.stam || "#8a6f57"));
     stam.scale.y = t.stam + s * 0.5;
     stam.position.y = (t.stam + s * 0.5) / 2;
     g.add(stam);
@@ -160,18 +337,41 @@ function trad(t, tema, y0) {
 }
 
 /**
- * Bygger sockeln, graset och traden. niva ar hojden pa sockelns
- * ovansida, och hal ar oppningarna dar trappor gar ner.
+ * Traden ur kartan, med fast slumpad farg och vridning. Ett trad som
+ * star for nara huset hoppas over, sa att det aldrig skymmer figuren.
  */
-export function byggOmgivning(layout, tema, hal, niva) {
+function planteraTrad(lista, rutor) {
+  const slp = slump("parken");
+  const fritt = (x, z, luft) => rutor.every(r =>
+    x < r.x - luft || x > r.x + r.bredd + luft || z < r.z - luft || z > r.z + r.djup + luft);
+  return lista.map(t => ({
+    x: t.x, z: t.z, buske: !!t.buske, storlek: t.storlek ?? 1.2,
+    stam: t.buske ? 0 : (t.stam ?? 0.9 + slp() * 0.4),
+    farg: Math.floor(slp() * 3), vrid: slp() * Math.PI * 2
+  })).filter(t => fritt(t.x, t.z, SOCKEL_LUFT + (t.buske ? 2.6 : TRAD_LUFT)));
+}
+
+// ----------------------------------------------------------------- allt
+
+/**
+ * Bygger sockeln och kvarteret runt huset. niva ar hojden pa sockelns
+ * ovansida, hal ar oppningarna dar trappor gar ner, och kvarter ar
+ * innehallet i omgivning.json.
+ */
+export function byggOmgivning(layout, tema, hal, niva, kvarter = {}) {
   const grupp = new THREE.Group();
   grupp.name = "omgivning";
   const { bredd, djup } = layout.bounds;
   const mitt = { x: bredd / 2, z: djup / 2 };
   const rutor = husetsRutor(layout);
-  const allaTrad = planteraTrad(rutor, mitt);
+  const allaTrad = planteraTrad(kvarter.trad || [], rutor);
 
-  const tex = new THREE.CanvasTexture(markDuk(tema, mitt, allaTrad));
+  BORTOM.bortomFarg.value.set(tema.bakgrund);
+  BORTOM.bortomRuta.value.set(0, 0, bredd, djup);
+  BORTOM.bortomAvst.value.set(kvarter.bortom?.borjar ?? 14, kvarter.bortom?.slutar ?? 62);
+
+  const mark = niva - SOCKEL_HOJD;
+  const tex = new THREE.CanvasTexture(markDuk(tema, mitt, kvarter, allaTrad));
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   // En ShapeGeometry har meter som uv, sa texturen skalas till skivan.
@@ -179,13 +379,13 @@ export function byggOmgivning(layout, tema, hal, niva) {
   tex.offset.set(0.5, 0.5);
   const skiva = new THREE.Shape();
   skiva.absarc(0, 0, RADIE, 0, Math.PI * 2, false);
-  const gras = new THREE.Mesh(new THREE.ShapeGeometry(medHal(skiva, hal, mitt), 64),
-    new THREE.MeshStandardMaterial({ map: tex, roughness: 1 }));
-  gras.rotation.x = -Math.PI / 2;
-  gras.position.set(mitt.x, niva - SOCKEL_HOJD, mitt.z);
-  gras.receiveShadow = true;
-  gras.name = "gras";
-  grupp.add(gras);
+  const marken = new THREE.Mesh(new THREE.ShapeGeometry(medHal(skiva, hal, mitt), 64),
+    tonaBort(new THREE.MeshStandardMaterial({ map: tex, roughness: 1 })));
+  marken.rotation.x = -Math.PI / 2;
+  marken.position.set(mitt.x, mark, mitt.z);
+  marken.receiveShadow = true;
+  marken.name = "marken";
+  grupp.add(marken);
 
   // Sockeln: en stenlagd platta med rundade horn som foljer husets form.
   const fas = 0.05;
@@ -196,13 +396,14 @@ export function byggOmgivning(layout, tema, hal, niva) {
       new THREE.ExtrudeGeometry(medHal(form, hal, mitt), {
         depth: SOCKEL_HOJD - fas, bevelEnabled: true, bevelSize: fas, bevelThickness: fas,
         bevelSegments: 2, curveSegments: 8 }),
-      mat(tema.sockel || tema.mark, { roughness: 0.95 }));
+      new THREE.MeshStandardMaterial({ color: tema.sockel || tema.stadsmark, roughness: 0.95 }));
     sockel.rotation.x = -Math.PI / 2;
-    sockel.position.set(mitt.x, niva - SOCKEL_HOJD, mitt.z);
+    sockel.position.set(mitt.x, mark, mitt.z);
     sockel.receiveShadow = true;
     grupp.add(sockel);
   }
 
-  for (const t of allaTrad) grupp.add(trad(t, tema, niva - SOCKEL_HOJD));
+  for (const h of kvarter.hus || []) grupp.add(hus(h, tema, mark));
+  for (const t of allaTrad) grupp.add(trad(t, tema, mark));
   return grupp;
 }
