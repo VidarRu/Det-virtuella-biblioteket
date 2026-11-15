@@ -10,7 +10,8 @@
 // utan att nagon annan kod behover roras.
 
 import * as THREE from "three";
-import { byggVarld, byggLjus, VAGGHOJD } from "./varld.js";
+import { byggVarld, byggLjus, byggHimmel, byggOmgivningsljus, VAGGHOJD } from "./varld.js";
+import { skapaEfterbehandling } from "./efterbehandling.js";
 import { byggFigur, stegaFigur, animeraFigur, animeraFirande, FIGUR_HOJD } from "./figur.js";
 import { skapaHinder, arFri, flytta, paGolv, FIGUR_RADIE } from "./kollision.js";
 import { VYER } from "./vyer.js";
@@ -38,23 +39,45 @@ const layouter = await Promise.all(KARTFILER.map(fil =>
   fetch(new URL(fil, import.meta.url)).then(svar => svar.json())));
 
 document.title = SIDA.titel;
+// Medan varlden byggs syns bara bibliotekets namn och en rad text.
+const laddar = document.getElementById("laddar");
+if (laddar) {
+  laddar.querySelector("h1").textContent = SIDA.titel;
+  laddar.querySelector("p").textContent = SIDA.laddar;
+  // Later webblasaren rita texten innan det tunga arbetet borjar.
+  await new Promise(klar => requestAnimationFrame(() => setTimeout(klar, 0)));
+}
 const duk = document.getElementById("spelduk");
 const lugnt = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const renderare = new THREE.WebGLRenderer({ canvas: duk, antialias: true });
 renderare.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderare.shadowMap.enabled = true;
-renderare.shadowMap.type = THREE.PCFSoftShadowMap;
+renderare.shadowMap.type = THREE.PCFShadowMap;
 // Mjukare och mer filmiska farger, utan att de vita ytorna blir graa.
 renderare.toneMapping = THREE.NeutralToneMapping;
 renderare.toneMappingExposure = 1.1;
 
 const scen = new THREE.Scene();
 scen.background = new THREE.Color(TEMA.bakgrund);
-scen.fog = new THREE.Fog(TEMA.bakgrund, 55, 120);
+scen.fog = new THREE.Fog(TEMA.bakgrund, 70, 150);
+scen.add(byggHimmel(TEMA));
+scen.environment = byggOmgivningsljus(renderare, TEMA);
+scen.environmentIntensity = 0.3;
+// Raknas om for hand, sa att alla steg i efterbehandlingen kommer med.
+renderare.info.autoReset = false;
+
+// Hur fin bilden ska vara. ?kvalitet=hog eller ?kvalitet=lag i adressen
+// valjer sjalv. Annars borjar bilden fin, och blir enklare om det gar
+// for trogt, se matFart langre ner.
+const valdKvalitet = new URLSearchParams(location.search).get("kvalitet");
+const pekskarm = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+const efter = skapaEfterbehandling(renderare, {
+  enkel: pekskarm, niva: valdKvalitet === "lag" ? 1 : 2 });
+if (valdKvalitet === "lag") renderare.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
 
 // Bada vaningarna har samma yttermatt, sa ett ljus racker for bada.
-scen.add(byggLjus(layouter[0], TEMA));
+scen.add(byggLjus(layouter[0], TEMA, { skuggkarta: pekskarm ? 2048 : 4096 }));
 
 const figur = byggFigur(TEMA);
 scen.add(figur);
@@ -956,6 +979,8 @@ function passaStorlek() {
   if (storlek !== `${b}x${h}`) {
     storlek = `${b}x${h}`;
     renderare.setSize(b, h, false);
+    const pr = renderare.getPixelRatio();
+    efter?.storlek(Math.round(b * pr), Math.round(h * pr));
     kamera.aspect = b / h;
     // En staende mobilskarm ar smal. Kameran far da en storre synvinkel
     // pa hojden, sa att det inte blir som att titta genom ett titthal.
@@ -976,13 +1001,36 @@ function rita(tid = performance.now() / 1000) {
   V.infopunkter.animera();
   if (bokLager.pa) V.bokjakt.animera(tid);
   passaStorlek();
-  renderare.render(scen, kamera);
+  renderare.info.reset();
+  if (efter) efter.rita(scen, kamera);
+  else renderare.render(scen, kamera);
+}
+
+// Gar det for trogt blir bilden enklare, ett steg i taget: forst utan
+// skuggorna i vinklar, sedan med farre bildpunkter. Det hander bara i
+// borjan, sa bilden andrar sig inte medan man gar omkring.
+const fart = { rutor: 0, uppvarmning: 8, summa: 0, matningar: 0, klar: !!valdKvalitet };
+function matFart(sekunder) {
+  // Ett langt uppehall betyder att fliken har legat i bakgrunden.
+  if (fart.klar || sekunder > 2 || document.hidden) return;
+  if (fart.uppvarmning-- > 0) return;          // de forsta rutorna ar alltid troga
+  fart.rutor++;
+  fart.summa += sekunder;
+  if (fart.rutor < 45 && (fart.summa < 3 || fart.rutor < 5)) return;
+  const snitt = fart.summa / fart.rutor;
+  fart.rutor = 0; fart.summa = 0; fart.uppvarmning = 4;
+  if (snitt < 1 / 34 || ++fart.matningar > 4) { fart.klar = true; return; }
+  if (efter?.niva > 1) { efter.sank(); return; }
+  const pr = renderare.getPixelRatio();
+  if (pr > 1) { renderare.setPixelRatio(Math.max(1, pr - 0.5)); storlek = ""; return; }
+  fart.klar = true;
 }
 
 let forra = performance.now();
 function slinga(nu) {
   const dt = Math.min((nu - forra) / 1000, 0.05);
   const tid = nu / 1000;
+  matFart((nu - forra) / 1000);
   forra = nu;
   if (mobilLage && !byter) {
     stegaMobil(dt);
@@ -1134,7 +1182,10 @@ window.spel = {
     rita();
     const i = renderare.info.render;
     return { ritanrop: i.calls, trianglar: i.triangles,
-             bocker: V.varld.userData.antalBocker };
+             bocker: V.varld.userData.antalBocker,
+             kvalitet: efter?.niva ?? 0, bildpunkter: renderare.getPixelRatio() };
   }
 };
 document.body.dataset.klar = "1";
+laddar?.classList.add("klar");
+setTimeout(() => laddar?.remove(), 700);
