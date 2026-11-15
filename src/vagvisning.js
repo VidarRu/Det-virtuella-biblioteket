@@ -197,7 +197,7 @@ export function byggPrickar() {
   grupp.visible = false;
 
   const prickMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.5
+    color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.5
   });
   // Lite tillplattade kulor, som godisknappar pa golvet.
   const prickGeo = new THREE.SphereGeometry(0.14, 16, 10);

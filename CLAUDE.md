@@ -65,6 +65,14 @@ Det vi tar därifrån:
   fotorealistiska texturer.
 - **Enkla, tydliga färgytor** i stället för mönster och detaljer.
 - **Typsnittet Nunito**, runt och vänligt, i alla rutor och skyltar.
+- **Modell på en platta.** Huset står på en stenlagd sockel i en liten
+  park med gräs och runda träd (`src/omgivning.js`). Väggarnas överkant
+  har en något mörkare ton, så att planlösningen syns uppifrån. Träden
+  står alltid en bit från huset och är lägre än kameran, så att de inte
+  skymmer figuren.
+- **Varmt ljus och mjuka skuggor.** Solen står i sydost. Skuggorna i
+  vinklar och springor, skenet kring lamporna och tonkurvan läggs på i
+  `src/efterbehandling.js`. Inget av det rör sig.
 
 Det vi inte tar: fysiken, att saker välter och studsar, och allt som rör
 sig av sig självt. Lugnet går före leksakskänslan.
@@ -90,6 +98,8 @@ alltid i `src/mobler.js` och `src/former.js` först.
 | `src/config/content.js` | Alla texter, platser och färger: `SIDA`, `PLATSER`, `OPPETTIDER`, `KONTAKT`, `INFOPUNKTER`, `RUTOR`, `BEHOV`, `MOBIL`, `MINISPEL`, `BOKJAKT`, `TEMA` |
 | `src/vyer.js` | Fasta kameravyer för granskning (`?vy=oversikt`, `?vy=salen` …) |
 | `src/varld.js`, `mobler.js`, `bocker.js`, `former.js` | Bygger 3D-världen ur kartfilen |
+| `src/omgivning.js` | Det som finns runt huset: stenlagd sockel, gräs och runda träd. Går inte att gå på |
+| `src/efterbehandling.js` | Bildens sista steg: mjuka skuggor i vinklar, svagt sken kring lampor, tonkurva |
 | `src/zoner.js` | Golvzoner och skyltar, inklusive `fritFranVaggar` |
 | `src/vagvisning.js` | Gula prickar och vägsökning, även mellan våningar |
 | `src/mobilmeny.js`, `firande.js` | Mobilläget |
@@ -154,6 +164,11 @@ på plan 1.
 - `window.spel` är en krok för granskningen: `stall(x, z, riktning)`,
   `ga(sekunder, knappar)`, `bytVaning(plan)`, `titta(...)`, `skyltar`,
   `plattor`, `layout` med flera (slutet av `src/main.js`).
+- `?kvalitet=hog` låser bilden på finaste nivån och `?kvalitet=lag` på
+  den enklaste. Utan det börjar bilden fin och blir enklare av sig själv
+  om det går trögt (`matFart` i `src/main.js`). I Chromium utan grafikkort
+  går det alltid trögt, så använd `?kvalitet=hog` för skärmdumpar. Räkna
+  med ett par minuter per bild.
 - Jämför samma `?vy=` före och efter. Lägg till en ny vy i `src/vyer.js`
   när ett nytt hörn behöver granskas.
 - Testa både datorläget och `?lage=mobil`, och att alla val i hjulet och
@@ -189,7 +204,7 @@ Det här är det som byts ut när motorn används för ett annat bibliotek:
   `layout_plan1.json` (plan 1). Vilka filer som läses står i `KARTOR` i
   `content.js`, med entréplanet först.
 - Allt innehåll i `src/config/content.js`: namn, adress, öppettider,
-  platser, färger (`TEMA`), valen i `BEHOV`, var spelen startar
+  platser, färger (`TEMA`, även gräs, träd, himmel och solljus), valen i `BEHOV`, var spelen startar
   (`RUTOR.spelPlats`, eller `null` för inga spel).
 - Vyerna i `src/vyer.js`, som har Västerviks koordinater.
 - Titeln i `index.html`. Sidan byter själv till `SIDA.titel` när den

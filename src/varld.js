@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { mat, rundLada, rundLadaMitt, slaIhop } from "./former.js";
 import { byggHyllor } from "./bocker.js";
 import { byggMobel, pendellampa } from "./mobler.js";
+import { byggOmgivning, SOL } from "./omgivning.js";
 
 export const VAGGHOJD = 3.20;
 const GOLVTJOCKLEK = 0.30;
@@ -173,28 +174,10 @@ function byggGolv(layout, tema) {
   yta.name = "golvyta";
   grupp.add(yta);
 
-  // Mjuk mark runt huset, sa att det inte svavar i tomma intet.
-  // Marken har samma hal som golvet, annars skymmer den trappschaktet.
-  const form = new THREE.Shape();
-  form.absarc(0, 0, 90, 0, Math.PI * 2, false);
-  for (const h of hal) {
-    // Formen ligger i x/y och vrids sedan ner, sa z blir -y.
-    const x0 = h.x - bredd / 2, y0 = -(h.z - djup / 2);
-    const p = new THREE.Path();
-    p.moveTo(x0, y0);
-    p.lineTo(x0, y0 - h.djup);
-    p.lineTo(x0 + h.bredd, y0 - h.djup);
-    p.lineTo(x0 + h.bredd, y0);
-    p.closePath();
-    form.holes.push(p);
-  }
-  const mark = new THREE.Mesh(new THREE.ShapeGeometry(form, 48), mat(tema.mark, { roughness: 1 }));
-  mark.rotation.x = -Math.PI / 2;
-  // Pa en ovre vaning ligger marken en vaning ner, se byggUtsikt.
+  // Runt huset: en stenlagd sockel, gras och trad. Pa en ovre vaning
+  // ligger marken en vaning ner, se byggUtsikt.
   const markDjup = layout.utsikt?.djup ?? GOLVTJOCKLEK;
-  mark.position.set(bredd / 2, -markDjup - 0.01, djup / 2);
-  mark.receiveShadow = true;
-  grupp.add(mark);
+  grupp.add(byggOmgivning(layout, tema, hal, -markDjup - 0.01));
   if (layout.utsikt) grupp.add(byggUtsikt(layout, tema, hal));
   return grupp;
 }
@@ -321,6 +304,15 @@ function fonstervagg(v, tema) {
   return g;
 }
 
+/**
+ * Vaggens ovankant i en nagot morkare ton. Huset ser da ut som en
+ * modell dar taket ar avlyft, och planlosningen syns tydligt uppifran.
+ */
+function krona(v, tema) {
+  return rundLada(v.x - 0.015, v.z - 0.015, v.bredd + 0.03, v.djup + 0.03, 0.09,
+                  VAGGHOJD - 0.07, mat(tema.vaggKant), 0.04);
+}
+
 function byggVaggar(layout, tema) {
   const grupp = new THREE.Group();
   for (const v of layout.walls) {
@@ -337,6 +329,7 @@ function byggVaggar(layout, tema) {
         map: tegelTextur(tema, Math.max(v.bredd, v.djup)), roughness: 0.9 });
     }
     grupp.add(rundLada(v.x, v.z, v.bredd, v.djup, VAGGHOJD, 0, material, 0.1));
+    grupp.add(krona(v, tema));
   }
 
   // Slutna rum, som toaletterna, blir rundade block med en farglad dorr.
@@ -347,6 +340,7 @@ function byggVaggar(layout, tema) {
   for (const b of layout.blocks) {
     if (b.gangbar) continue;
     grupp.add(rundLada(b.x, b.z, b.bredd, b.djup, VAGGHOJD, 0, mat(tema.vagg), 0.12));
+    grupp.add(krona(b, tema));
     const d = dorrar[b.id];
     if (!d) continue;
     const sidor = [].concat(b.dorrar || { sida: d.sida });
@@ -402,6 +396,30 @@ function wcSkylt(x, z, sida) {
 
 // --------------------------------------------------------------- lampor
 
+let polMaterial = null;
+/** Lampans varma sken pa golvet: en mjuk rund flack som inte ror sig. */
+function ljuspol(x, z, tema) {
+  if (!polMaterial) {
+    const duk = document.createElement("canvas");
+    duk.width = duk.height = 128;
+    const c = duk.getContext("2d");
+    const g = c.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.35, "rgba(255,255,255,0.55)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    c.fillStyle = g;
+    c.fillRect(0, 0, 128, 128);
+    polMaterial = new THREE.MeshBasicMaterial({
+      map: new THREE.CanvasTexture(duk), color: tema.lampSken, transparent: true,
+      opacity: 0.34, blending: THREE.AdditiveBlending, depthWrite: false });
+  }
+  const pol = new THREE.Mesh(new THREE.CircleGeometry(2.3, 32), polMaterial);
+  pol.rotation.x = -Math.PI / 2;
+  pol.position.set(x, 0.012, z);
+  pol.renderOrder = 1;
+  return pol;
+}
+
 /** Pendellampor over de zoner som TEMA namner, fler over stora zoner. */
 function byggLampor(layout, tema) {
   const grupp = new THREE.Group();
@@ -423,7 +441,9 @@ function byggLampor(layout, tema) {
         const a = (i + 0.5) / antal;
         const x = langsX ? r.x + r.bredd * a : r.x + r.bredd / 2;
         const z = langsX ? r.z + r.djup / 2 : r.z + r.djup * a;
-        if (!iVagen(x, z)) grupp.add(pendellampa(x, z, tema));
+        if (iVagen(x, z)) continue;
+        grupp.add(pendellampa(x, z, tema));
+        grupp.add(ljuspol(x, z, tema));
       }
     }
   }
@@ -455,23 +475,30 @@ export function byggVarld(layout, tema) {
   return slaIhop(varld);
 }
 
-/** Varmt, mjukt ljus, som en ljus eftermiddag i biblioteket. */
-export function byggLjus(layout, tema) {
+/**
+ * Varmt, mjukt ljus, som en ljus eftermiddag i biblioteket. Solen star
+ * i sydost, sa att den lyser in genom de stora fonstren och pa de
+ * vaggar man ser fran entren.
+ */
+export function byggLjus(layout, tema, { skuggkarta = 4096 } = {}) {
   const grupp = new THREE.Group();
 
-  grupp.add(new THREE.HemisphereLight(0xfff4e6, 0xd9c6ad, 1.7));
+  // Himlen lyser svalt uppifran och golvet varmt nerifran. Skuggorna
+  // far da en egen farg i stallet for att bara bli morkare.
+  grupp.add(new THREE.HemisphereLight(tema.himmelUpp || 0xe9eef2, tema.golvSken || 0xd8b98f, 0.5));
 
-  const sol = new THREE.DirectionalLight(0xfff0d8, 2.3);
+  const sol = new THREE.DirectionalLight(tema.solljus || 0xffe6c4, 2.6);
   const { bredd, djup } = layout.bounds;
-  sol.position.set(bredd + 12, 30, djup * 0.2);
+  sol.position.set(bredd / 2, 0, djup / 2).addScaledVector(SOL, 48);
   sol.target.position.set(bredd / 2, 0, djup / 2);
   sol.castShadow = true;
-  sol.shadow.mapSize.set(2048, 2048);
-  sol.shadow.bias = -0.0005;
-  sol.shadow.normalBias = 0.02;
+  sol.shadow.mapSize.set(skuggkarta, skuggkarta);
+  sol.shadow.bias = -0.0004;
+  sol.shadow.normalBias = 0.025;
+  sol.shadow.radius = 2.5;
 
   // Skuggkameran tacker precis byggnaden, annars blir skuggorna grova.
-  const r = Math.max(bredd, djup) * 0.62;
+  const r = Math.hypot(bredd, djup) * 0.56;
   const k = sol.shadow.camera;
   k.left = -r; k.right = r; k.top = r; k.bottom = -r;
   k.near = 1; k.far = 110;
@@ -479,4 +506,57 @@ export function byggLjus(layout, tema) {
   grupp.add(sol);
   grupp.add(sol.target);
   return grupp;
+}
+
+// ------------------------------------------------------------- himlen
+
+function himmelDuk(tema) {
+  const duk = document.createElement("canvas");
+  duk.width = 4; duk.height = 256;
+  const c = duk.getContext("2d");
+  const g = c.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, tema.himmelUpp || "#cfdde4");
+  g.addColorStop(0.36, tema.himmelMitt || "#e7e6dc");
+  g.addColorStop(0.5, tema.bakgrund);
+  g.addColorStop(1, tema.bakgrund);
+  c.fillStyle = g;
+  c.fillRect(0, 0, 4, 256);
+  return duk;
+}
+
+/**
+ * Himlen: en stor kupa som tonar fran varmt vid horisonten till svalt
+ * hogst upp. Diset har samma farg som horisonten, sa marken overgar i
+ * himlen utan nagon kant.
+ */
+export function byggHimmel(tema) {
+  const tex = new THREE.CanvasTexture(himmelDuk(tema));
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const kupa = new THREE.Mesh(new THREE.SphereGeometry(330, 32, 24),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false }));
+  kupa.name = "himmel";
+  kupa.renderOrder = -10;
+  kupa.frustumCulled = false;
+  return kupa;
+}
+
+/**
+ * Ljuset som studsar runt i rummet. Utan det blir allt som ligger i
+ * skugga platt och gratt. Byggs ur en liten himmel med en varm sol.
+ */
+export function byggOmgivningsljus(renderare, tema) {
+  const scen = new THREE.Scene();
+  const tex = new THREE.CanvasTexture(himmelDuk({
+    ...tema, bakgrund: tema.golvSken || "#d8b98f" }));
+  tex.colorSpace = THREE.SRGBColorSpace;
+  scen.add(new THREE.Mesh(new THREE.SphereGeometry(10, 24, 16),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide })));
+  const solflack = new THREE.Mesh(new THREE.SphereGeometry(2.6, 16, 12),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(tema.solljus || "#ffe6c4").multiplyScalar(3) }));
+  solflack.position.copy(SOL).multiplyScalar(9);
+  scen.add(solflack);
+  const pmrem = new THREE.PMREMGenerator(renderare);
+  const ut = pmrem.fromScene(scen, 0.04).texture;
+  pmrem.dispose();
+  return ut;
 }

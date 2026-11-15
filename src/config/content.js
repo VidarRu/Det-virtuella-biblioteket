@@ -20,6 +20,7 @@
 
 export const SIDA = {
   titel: "Västerviks stadsbibliotek",
+  laddar: "Biblioteket byggs upp. Det tar en liten stund.",
   framme: "Du är framme vid {namn}",
   visarVag: "Följ prickarna till {namn}",
   stangHjalp: "Tryck Esc för att sluta visa vägen",
@@ -575,8 +576,20 @@ export const BOKJAKT = {
 
 export const TEMA = {
   // Himmel och mark runt huset
-  bakgrund:      "#f6efe5",
+  bakgrund:      "#f1e7d8",   // horisonten, och diset långt bort
+  himmelMitt:    "#e9e6da",
+  himmelUpp:     "#c3d6e0",   // svagt blå högst upp
   mark:          "#efe6d8",
+  sockel:        "#d9ccb6",   // den stenlagda plattan som huset står på
+  gras:          "#b7c2a0",   // dämpat grönt runt huset
+  grasMonster:   "#a6b38f",
+  grasLjus:      "#c8d0b1",
+  lov:           ["#9cad88", "#8c9f7c", "#acb996"],   // trädens kronor
+  stam:          "#8a6f57",
+
+  // Ljuset
+  solljus:       "#fff0de",   // varm sol från sydost
+  golvSken:      "#d8b98f",   // det varma ljus som studsar upp från golvet
 
   // Golv
   golv:          "#c9c7c2",   // ljusgrått, som i bokhyllefotot
@@ -586,7 +599,7 @@ export const TEMA = {
 
   // Väggar
   vagg:          "#fbf6ee",   // varmvitt
-  vaggKant:      "#efe5d6",   // överkanten
+  vaggKant:      "#e3d3bc",   // överkanten
   laxrosa:       "#e6cdb8",   // accentväggar och pelare
   tegel:         "#c9a46c",   // tegelväggen vid hissen
   tegelFog:      "#a8865a",
@@ -619,7 +632,8 @@ export const TEMA = {
 
   // Bokryggarna dras slumpvis ur den här listan
   bocker: ["#7a3b33", "#8c5a3c", "#a8845c", "#5b4130", "#c8ad86",
-           "#e6dccb", "#6b4a3a", "#9a6b4f"],
+           "#e6dccb", "#6b4a3a", "#9a6b4f",
+           "#6f7d74", "#8b8a66", "#b3924f", "#56606a"],   // dämpat grönt, oliv, ockra och skiffer
 
   // Figuren: mörkröd tröja, så att den syns mot det ljusa golvet
   figurTroja:    "#8a3a30",
